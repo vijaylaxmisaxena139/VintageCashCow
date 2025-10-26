@@ -1,0 +1,42 @@
+@using ProductPricing.Models
+
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between">
+        <div>
+            <strong>Price History for @History?.Name</strong>
+        </div>
+        <div>
+            <button class="btn-close" @onclick="Close"></button>
+        </div>
+    </div>
+    <div class="card-body">
+        @if (History == null || History.PriceHistory == null || !History.PriceHistory.Any())
+        {
+            <div>No history available.</div>
+        }
+        else
+        {
+            <table class="table table-sm">
+                <thead>
+                    <tr><th>Date</th><th>Price</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in History.PriceHistory)
+                    {
+                        <tr>
+                            <td>@e.Date.ToString("yyyy-MM-dd")</td>
+                            <td>@e.Price.ToString("C")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public ProductHistory? History { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private Task Close() => OnClose.InvokeAsync(null);
+}

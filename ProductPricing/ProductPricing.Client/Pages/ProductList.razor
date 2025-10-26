@@ -1,0 +1,192 @@
+@page "/products"
+@using System.Net.Http.Json
+@using ProductPricing.Models
+@inject HttpClient Http
+@rendermode InteractiveWebAssembly
+
+<PageTitle>Products</PageTitle>
+
+<h3>Products</h3>
+
+<div class="mb-3">
+    @if (!string.IsNullOrEmpty(Message))
+    {
+        <div class="alert @MessageClass">@Message</div>
+    }
+</div>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Price</th>
+            <th>Last Updated</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (Products == null)
+        {
+            <tr><td colspan="4">Loading...</td></tr>
+        }
+        else
+        {
+            @foreach (var p in Products)
+            {
+                <tr>
+                    <td>@p.Name</td>
+                    <td>@p.Price.ToString("C")</td>
+                    <td>@(p.LastUpdated == DateTime.MinValue ? "" : p.LastUpdated.ToLocalTime().ToString("g"))</td>
+                    <td>
+                        <div class="d-flex gap-2 align-items-center">
+                            <button class="btn btn-link" @onclick="() => ViewHistory(p.Id)">View History</button>
+
+                            <div class="input-group input-group-sm" style="max-width:200px">
+                                <input class="form-control" placeholder="Discount %" value="@GetDiscountInput(p.Id)" @onchange="(e) => SetDiscountInput(p.Id, e.Value?.ToString())" />
+                                <button class="btn btn-primary" @onclick="() => ApplyDiscount(p.Id)">Apply</button>
+                            </div>
+
+                            <div class="input-group input-group-sm" style="max-width:200px">
+                                <input class="form-control" placeholder="New price" value="@GetPriceInput(p.Id)" @onchange="(e) => SetPriceInput(p.Id, e.Value?.ToString())" />
+                                <button class="btn btn-success" @onclick="() => UpdatePrice(p.Id)">Update</button>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            }
+        }
+    </tbody>
+</table>
+
+@if (ShowHistory && SelectedHistory != null)
+{
+    <ProductHistoryView History="SelectedHistory" OnClose="CloseHistory" />
+}
+
+@code {
+    private List<Product>? Products;
+    private Dictionary<int, decimal> DiscountInputs = new();
+    private Dictionary<int, decimal> PriceInputs = new();
+
+    private string Message = string.Empty;
+    private string MessageClass = string.Empty;
+
+    private bool ShowHistory = false;
+    private ProductHistory? SelectedHistory;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProducts();
+    }
+
+    private async Task LoadProducts()
+    {
+        try
+        {
+            Products = await Http.GetFromJsonAsync<List<Product>>("/api/products");
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error loading products: {ex.Message}", false);
+        }
+    }
+
+    private void ShowMessage(string text, bool success)
+    {
+        Message = text;
+        MessageClass = success ? "alert-success" : "alert-danger";
+        StateHasChanged();
+    }
+
+    private async Task ApplyDiscount(int id)
+    {
+        if (!DiscountInputs.TryGetValue(id, out var discount))
+        {
+            ShowMessage("Enter a discount percentage.", false);
+            return;
+        }
+        if (discount < 0 || discount > 100)
+        {
+            ShowMessage("Discount must be between 0 and 100.", false);
+            return;
+        }
+
+        var req = new { DiscountPercentage = discount };
+        var resp = await Http.PostAsJsonAsync($"/api/products/{id}/apply-discount", req);
+        if (resp.IsSuccessStatusCode)
+        {
+            var result = await resp.Content.ReadFromJsonAsync<ApplyDiscountResult>();
+            ShowMessage($"Discount applied. Original: {result?.originalPrice:C}, New: {result?.discountedPrice:C}", true);
+            await LoadProducts();
+        }
+        else
+        {
+            var err = await resp.Content.ReadAsStringAsync();
+            ShowMessage($"Error applying discount: {err}", false);
+        }
+    }
+
+    private async Task UpdatePrice(int id)
+    {
+        if (!PriceInputs.TryGetValue(id, out var newPrice))
+        {
+            ShowMessage("Enter a new price.", false);
+            return;
+        }
+        if (newPrice <= 0)
+        {
+            ShowMessage("Price must be positive.", false);
+            return;
+        }
+
+        var req = new { NewPrice = newPrice };
+        var resp = await Http.PutAsJsonAsync($"/api/products/{id}/update-price", req);
+        if (resp.IsSuccessStatusCode)
+        {
+            var result = await resp.Content.ReadFromJsonAsync<UpdatePriceResult>();
+            ShowMessage($"Price updated to {result?.newPrice:C}", true);
+            await LoadProducts();
+        }
+        else
+        {
+            var err = await resp.Content.ReadAsStringAsync();
+            ShowMessage($"Error updating price: {err}", false);
+        }
+    }
+
+    private async Task ViewHistory(int id)
+    {
+        try
+        {
+            SelectedHistory = await Http.GetFromJsonAsync<ProductHistory>($"/api/products/{id}");
+            ShowHistory = true;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Error loading history: {ex.Message}", false);
+        }
+    }
+
+    private void CloseHistory()
+    {
+        ShowHistory = false;
+        SelectedHistory = null;
+    }
+
+    private string GetDiscountInput(int id) => DiscountInputs.TryGetValue(id, out var v) ? v.ToString() : string.Empty;
+    private void SetDiscountInput(int id, string? value)
+    {
+        if (decimal.TryParse(value, out var v)) DiscountInputs[id] = v;
+    }
+
+    private string GetPriceInput(int id) => PriceInputs.TryGetValue(id, out var v) ? v.ToString() : string.Empty;
+    private void SetPriceInput(int id, string? value)
+    {
+        if (decimal.TryParse(value, out var v)) PriceInputs[id] = v;
+    }
+
+    private class ApplyDiscountResult { public decimal originalPrice { get; set; } public decimal discountedPrice { get; set; } }
+    private class UpdatePriceResult { public decimal newPrice { get; set; } public DateTime lastUpdated { get; set; } }
+}
