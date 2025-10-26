@@ -11,7 +11,7 @@
 <div class="mb-3">
     @if (!string.IsNullOrEmpty(Message))
     {
-        <div class="alert @MessageClass">@Message</div>
+        <div class="alert @MessageClass" role="status">@Message</div>
     }
 </div>
 
@@ -36,19 +36,19 @@
                 <tr>
                     <td>@p.Name</td>
                     <td>@p.Price.ToString("C")</td>
-                    <td>@(p.LastUpdated == DateTime.MinValue ? "" : p.LastUpdated.ToLocalTime().ToString("g"))</td>
+                    <td>@(p.LastUpdated == DateTime.MinValue ? string.Empty : p.LastUpdated.ToLocalTime().ToString("g"))</td>
                     <td>
                         <div class="d-flex gap-2 align-items-center">
                             <button class="btn btn-link" @onclick="() => ViewHistory(p.Id)">View History</button>
 
                             <div class="input-group input-group-sm" style="max-width:200px">
-                                <input class="form-control" placeholder="Discount %" value="@GetDiscountInput(p.Id)" @onchange="(e) => SetDiscountInput(p.Id, e.Value?.ToString())" />
-                                <button class="btn btn-primary" @onclick="() => ApplyDiscount(p.Id)">Apply</button>
+                                <input type="number" step="0.01" class="form-control" placeholder="Discount %" @bind="DiscountInputs[p.Id]" />
+                                <button class="btn btn-primary" @onclick="() => ApplyDiscount(p.Id)" disabled="@(DiscountInputs[p.Id] == null)">Apply</button>
                             </div>
 
                             <div class="input-group input-group-sm" style="max-width:200px">
-                                <input class="form-control" placeholder="New price" value="@GetPriceInput(p.Id)" @onchange="(e) => SetPriceInput(p.Id, e.Value?.ToString())" />
-                                <button class="btn btn-success" @onclick="() => UpdatePrice(p.Id)">Update</button>
+                                <input type="number" step="0.01" class="form-control" placeholder="New price" @bind="PriceInputs[p.Id]" />
+                                <button class="btn btn-success" @onclick="() => UpdatePrice(p.Id)" disabled="@(PriceInputs[p.Id] == null)">Update</button>
                             </div>
                         </div>
                     </td>
@@ -65,8 +65,8 @@
 
 @code {
     private List<Product>? Products;
-    private Dictionary<int, decimal> DiscountInputs = new();
-    private Dictionary<int, decimal> PriceInputs = new();
+    private Dictionary<int, decimal?> DiscountInputs = new();
+    private Dictionary<int, decimal?> PriceInputs = new();
 
     private string Message = string.Empty;
     private string MessageClass = string.Empty;
@@ -84,7 +84,16 @@
         try
         {
             Products = await Http.GetFromJsonAsync<List<Product>>("/api/products");
-            StateHasChanged();
+
+            // Ensure dictionaries contain an entry for each product to support @bind to dictionary index
+            if (Products != null)
+            {
+                foreach (var p in Products)
+                {
+                    if (!DiscountInputs.ContainsKey(p.Id)) DiscountInputs[p.Id] = null;
+                    if (!PriceInputs.ContainsKey(p.Id)) PriceInputs[p.Id] = null;
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -96,12 +105,14 @@
     {
         Message = text;
         MessageClass = success ? "alert-success" : "alert-danger";
+
+        // Let Blazor re-render
         StateHasChanged();
     }
 
     private async Task ApplyDiscount(int id)
     {
-        if (!DiscountInputs.TryGetValue(id, out var discount))
+        if (!DiscountInputs.TryGetValue(id, out var discount) || discount == null)
         {
             ShowMessage("Enter a discount percentage.", false);
             return;
@@ -113,23 +124,30 @@
         }
 
         var req = new { DiscountPercentage = discount };
-        var resp = await Http.PostAsJsonAsync($"/api/products/{id}/apply-discount", req);
-        if (resp.IsSuccessStatusCode)
+        try
         {
-            var result = await resp.Content.ReadFromJsonAsync<ApplyDiscountResult>();
-            ShowMessage($"Discount applied. Original: {result?.originalPrice:C}, New: {result?.discountedPrice:C}", true);
-            await LoadProducts();
+            var resp = await Http.PostAsJsonAsync($"/api/products/{id}/apply-discount", req);
+            if (resp.IsSuccessStatusCode)
+            {
+                var result = await resp.Content.ReadFromJsonAsync<ApplyDiscountResult>();
+                ShowMessage($"Discount applied. Original: {result?.OriginalPrice:C}, New: {result?.DiscountedPrice:C}", true);
+                await LoadProducts();
+            }
+            else
+            {
+                var err = await resp.Content.ReadAsStringAsync();
+                ShowMessage($"Error applying discount: {err}", false);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            var err = await resp.Content.ReadAsStringAsync();
-            ShowMessage($"Error applying discount: {err}", false);
+            ShowMessage($"Error applying discount: {ex.Message}", false);
         }
     }
 
     private async Task UpdatePrice(int id)
     {
-        if (!PriceInputs.TryGetValue(id, out var newPrice))
+        if (!PriceInputs.TryGetValue(id, out var newPrice) || newPrice == null)
         {
             ShowMessage("Enter a new price.", false);
             return;
@@ -141,17 +159,24 @@
         }
 
         var req = new { NewPrice = newPrice };
-        var resp = await Http.PutAsJsonAsync($"/api/products/{id}/update-price", req);
-        if (resp.IsSuccessStatusCode)
+        try
         {
-            var result = await resp.Content.ReadFromJsonAsync<UpdatePriceResult>();
-            ShowMessage($"Price updated to {result?.newPrice:C}", true);
-            await LoadProducts();
+            var resp = await Http.PutAsJsonAsync($"/api/products/{id}/update-price", req);
+            if (resp.IsSuccessStatusCode)
+            {
+                var result = await resp.Content.ReadFromJsonAsync<UpdatePriceResult>();
+                ShowMessage($"Price updated to {result?.NewPrice:C}", true);
+                await LoadProducts();
+            }
+            else
+            {
+                var err = await resp.Content.ReadAsStringAsync();
+                ShowMessage($"Error updating price: {err}", false);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            var err = await resp.Content.ReadAsStringAsync();
-            ShowMessage($"Error updating price: {err}", false);
+            ShowMessage($"Error updating price: {ex.Message}", false);
         }
     }
 
@@ -161,7 +186,6 @@
         {
             SelectedHistory = await Http.GetFromJsonAsync<ProductHistory>($"/api/products/{id}");
             ShowHistory = true;
-            StateHasChanged();
         }
         catch (Exception ex)
         {
@@ -175,18 +199,6 @@
         SelectedHistory = null;
     }
 
-    private string GetDiscountInput(int id) => DiscountInputs.TryGetValue(id, out var v) ? v.ToString() : string.Empty;
-    private void SetDiscountInput(int id, string? value)
-    {
-        if (decimal.TryParse(value, out var v)) DiscountInputs[id] = v;
-    }
-
-    private string GetPriceInput(int id) => PriceInputs.TryGetValue(id, out var v) ? v.ToString() : string.Empty;
-    private void SetPriceInput(int id, string? value)
-    {
-        if (decimal.TryParse(value, out var v)) PriceInputs[id] = v;
-    }
-
-    private class ApplyDiscountResult { public decimal originalPrice { get; set; } public decimal discountedPrice { get; set; } }
-    private class UpdatePriceResult { public decimal newPrice { get; set; } public DateTime lastUpdated { get; set; } }
+    private class ApplyDiscountResult { public decimal OriginalPrice { get; set; } public decimal DiscountedPrice { get; set; } }
+    private class UpdatePriceResult { public decimal NewPrice { get; set; } public DateTime LastUpdated { get; set; } }
 }

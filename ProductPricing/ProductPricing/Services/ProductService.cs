@@ -31,10 +31,10 @@ public class ProductService : IProductService
         return _products;
     }
 
-    public ProductHistory GetPriceHistory(int id)
+    public ProductHistory? GetPriceHistory(int id)
     {
         var product = _products.FirstOrDefault(p => p.Id == id);
-        if (product == null) return null!;
+        if (product == null) return null;
         _history.TryGetValue(id, out var entries);
         return new ProductHistory
         {
@@ -44,10 +44,10 @@ public class ProductService : IProductService
         };
     }
 
-    public Product ApplyDiscount(int id, decimal discountPercentage)
+    public Product? ApplyDiscount(int id, decimal discountPercentage)
     {
         var product = _products.FirstOrDefault(p => p.Id == id);
-        if (product == null) return null!;
+        if (product == null) return null;
         var originalPrice = product.Price;
         var discounted = Math.Round(originalPrice * (1 - discountPercentage / 100m), 2);
 
@@ -67,10 +67,10 @@ public class ProductService : IProductService
         };
     }
 
-    public Product UpdatePrice(int id, decimal newPrice)
+    public Product? UpdatePrice(int id, decimal newPrice)
     {
         var product = _products.FirstOrDefault(p => p.Id == id);
-        if (product == null) return null!;
+        if (product == null) return null;
 
         // Record history
         if (!_history.ContainsKey(id)) _history[id] = new List<PriceEntry>();
